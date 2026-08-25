@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HofNavi Alpha 0.8</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#0d120e;--panel:#182019;--panel2:#222c22;--line:#3b493b;--text:#f2f5ef;--muted:#aeb8ac;--green:#a6f326;--yellow:#ffd15a;--red:#ff6969}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+header{height:64px;background:#141b15;display:flex;align-items:center;justify-content:space-between;padding:0 15px;border-bottom:1px solid var(--line)}
+.logo{font-weight:900;font-size:22px}.logo span{color:var(--green)}small{display:block;color:var(--muted);font-size:10px}
+button,input,select{font:inherit}button{border:0;border-radius:11px;padding:11px 13px;background:var(--green);color:#0d120e;font-weight:850}button.alt{background:#394439;color:var(--text)}
+.layout{display:grid;grid-template-columns:390px 1fr;min-height:calc(100vh - 64px)}aside{padding:12px;background:var(--panel);overflow:auto}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:15px;padding:13px;margin-bottom:11px}.card h2,.card h3{margin:0 0 9px}
+input,select{width:100%;padding:10px;margin-top:7px;border-radius:9px;border:1px solid #4b574b;background:#101610;color:var(--text)}
+.row{display:flex;gap:7px}.row>*{flex:1}.grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.full{width:100%;margin-top:8px}
+.status{margin-top:8px;padding:10px;border-radius:10px;background:#101610;line-height:1.45}.good{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}.muted{color:var(--muted);font-size:13px;line-height:1.45}
+#map{height:calc(100vh - 64px);background:#c8d3c1}.place{padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+@media(max-width:850px){.layout{display:flex;flex-direction:column}.mapbox{order:1;height:52vh;min-height:370px}.side{order:2}#map{height:100%}}
+</style>
+</head>
+<body>
+<header><div class="logo">🚜 Hof<span>Navi</span><small>ALPHA 0.8 · KARTE + GPS + ROUTE</small></div><button class="alt" onclick="gps()">📍 Standort</button></header>
+<div class="layout">
+<aside class="side">
+<div class="card"><h2>🚜 Gespann</h2>
+<div class="row"><button id="tb" onclick="typeSet('tractor')">🚜 Traktor</button><button id="lb" class="alt" onclick="typeSet('truck')">🚛 LKW</button></div>
+<select id="brand"></select><input id="model" value="724 Vario" placeholder="Modell">
+<select id="trailer"><option>Kein Anhänger</option><option>Tandem</option><option>Tridem</option><option>Drehschemel</option><option>Tieflader</option><option>Güllewagen</option><option>Kipper</option></select>
+<div class="grid"><input id="width" type="number" step=".01" value="3.05" placeholder="Breite m"><input id="height" type="number" step=".01" value="4.10" placeholder="Höhe m"><input id="length" type="number" step=".1" value="7.20" placeholder="Länge m"><input id="weight" type="number" step=".1" value="12.5" placeholder="Gewicht t"></div>
+<input id="radius" type="number" step=".1" value="7" placeholder="Wenderadius m">
+<button class="full" onclick="saveProfile()">💾 Gespann speichern</button></div>
+
+<div class="card"><h2>🧭 Navigation</h2>
+<input id="search" placeholder="Adresse, Ort oder Feldname">
+<div class="row"><button onclick="search()">🔎 Suchen</button><button class="alt" onclick="mapTarget()">🎯 Karte</button></div>
+<div id="target" class="status">Ziel fehlt. Suche eine Adresse oder tippe auf die Karte.</div>
+<button class="full" onclick="route()">🛣️ Route berechnen</button>
+<div id="routeStatus" class="status">Noch keine Route berechnet.</div></div>
+
+<div class="card"><h3>🌾 Hof / Feld / Einfahrt</h3>
+<input id="place" placeholder="z.B. Hof Müller · Feld 17 · Einfahrt Süd">
+<button class="full" onclick="savePlace()">📍 Punkt speichern</button>
+<div id="places"></div></div>
+
+<div class="card"><h3>⚠️ Sicherheitscheck</h3><div id="checks" class="muted">Noch keine Route geprüft.</div></div>
+<div class="card muted"><b>Hinweis:</b> Diese Alpha nutzt echte Kartendaten und eine Routing-Demo. Sie ist noch keine sicherheitszertifizierte landwirtschaftliche Navigation.</div>
+</aside>
+<div class="mapbox"><div id="map"></div></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const tractorBrands=['Fendt','John Deere','CLAAS','Case IH','New Holland','Deutz-Fahr','Valtra','Massey Ferguson','Steyr','Kubota','Sonstige'];
+const truckBrands=['MAN','Mercedes-Benz','Scania','Volvo','DAF','Iveco','Renault Trucks','Sonstige'];
+let type='tractor',map,userMarker,targetMarker,routeLine,targetLL=null;
+let places=JSON.parse(localStorage.getItem('hn_places')||'[]');
+
+function init(){
+ map=L.map('map').setView([51.9,10.5],6);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap-Mitwirkende'}).addTo(map);
+ map.on('click',e=>setTarget(e.latlng));
+ typeSet('tractor');renderPlaces();
+}
+function typeSet(t){
+ type=t;
+ document.getElementById('tb').className=t==='tractor'?'':'alt';
+ document.getElementById('lb').className=t==='truck'?'':'alt';
+ document.getElementById('brand').innerHTML=(t==='tractor'?tractorBrands:truckBrands).map(x=>'<option>'+x+'</option>').join('');
+ document.getElementById('model').value=t==='tractor'?'724 Vario':'TGX';
+ document.getElementById('width').value=t==='tractor'?'3.05':'2.55';
+ document.getElementById('height').value=t==='tractor'?'4.10':'4.00';
+ document.getElementById('length').value=t==='tractor'?'7.20':'16.50';
+ document.getElementById('weight').value=t==='tractor'?'12.5':'40';
+ document.getElementById('radius').value=t==='tractor'?'7':'12';
+}
+function n(id){return parseFloat(document.getElementById(id).value)||0}
+function profile(){return{brand:brand.value,model:model.value,trailer:trailer.value,width:n('width'),height:n('height'),length:n('length'),weight:n('weight'),radius:n('radius')}}
+function saveProfile(){let p=profile();localStorage.setItem('hn_profile',JSON.stringify(p));document.getElementById('target').innerHTML='<span class="good">✓ Gespann gespeichert.</span><br>'+p.brand+' '+p.model+' · '+p.trailer}
+function gps(){
+ if(!navigator.geolocation){alert('GPS wird nicht unterstützt.');return}
+ navigator.geolocation.getCurrentPosition(pos=>{
+  let ll=[pos.coords.latitude,pos.coords.longitude];
+  if(userMarker)userMarker.setLatLng(ll);else userMarker=L.marker(ll).addTo(map).bindPopup('📍 Dein Standort');
+  map.setView(ll,15);document.getElementById('target').innerHTML='<span class="good">📍 Standort gefunden.</span> Tippe jetzt auf die Karte für ein Ziel.';
+ },()=>document.getElementById('target').innerHTML='<span class="warn">GPS nicht verfügbar.</span> Standortfreigabe prüfen.',{enableHighAccuracy:true,timeout:10000});
+}
+function setTarget(ll){
+ targetLL=[ll.lat,ll.lng];
+ if(targetMarker)targetMarker.setLatLng(targetLL);else targetMarker=L.marker(targetLL).addTo(map).bindPopup('🎯 Ziel').openPopup();
+ document.getElementById('target').innerHTML='<span class="good">🎯 Ziel gesetzt.</span><br>'+ll.lat.toFixed(5)+', '+ll.lng.toFixed(5);
+}
+function mapTarget(){document.getElementById('target').innerHTML='<span class="warn">🎯 Tippe jetzt auf die Karte.</span>'}
+async function search(){
+ let q=document.getElementById('search').value.trim();if(!q)return;
+ document.getElementById('target').textContent='🔎 Suche…';
+ try{
+  let r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de,at,ch&q='+encodeURIComponent(q));
+  let a=await r.json();if(!a.length){document.getElementById('target').innerHTML='<span class="bad">Kein Ziel gefunden.</span>';return}
+  let ll={lat:+a[0].lat,lng:+a[0].lon};setTarget(ll);map.setView([ll.lat,ll.lng],15);
+ }catch(e){document.getElementById('target').innerHTML='<span class="bad">Suche fehlgeschlagen.</span>'}
+}
+async function route(){
+ if(!targetLL){document.getElementById('routeStatus').innerHTML='<span class="warn">Bitte zuerst ein Ziel setzen.</span>';return}
+ let s=userMarker?userMarker.getLatLng():map.getCenter(),t={lat:targetLL[0],lng:targetLL[1]};
+ document.getElementById('routeStatus').textContent='🧭 Route wird berechnet…';
+ try{
+  let u=`https://router.project-osrm.org/route/v1/driving/${s.lng},${s.lat};${t.lng},${t.lat}?overview=full&geometries=geojson`;
+  let d=await (await fetch(u)).json();if(d.code!=='Ok')throw 0;
+  if(routeLine)map.removeLayer(routeLine);
+  routeLine=L.geoJSON(d.routes[0].geometry,{style:{color:'#a6f326',weight:7}}).addTo(map);
+  map.fitBounds(routeLine.getBounds(),{padding:[20,20]});
+  let p=profile(),km=d.routes[0].distance/1000,swept=2*(p.radius+p.length/2+p.width/2),critical=swept>7;
+  document.getElementById('routeStatus').innerHTML='<span class="good">🟢 Route gefunden.</span><br>'+km.toFixed(1)+' km · ca. '+Math.round(d.routes[0].duration/60)+' min<br>'+(critical?'<span class="warn">⚠️ Geometrie kritisch – nicht als sicher freigeben.</span>':'<span class="good">✓ Keine Demo-Geometriewarnung.</span>');
+  document.getElementById('checks').innerHTML='Breite: '+p.width.toFixed(2)+' m · Höhe: '+p.height.toFixed(2)+' m · Länge: '+p.length.toFixed(1)+' m · Gewicht: '+p.weight.toFixed(1)+' t · Wenderadius: '+p.radius.toFixed(1)+' m<br><br><span class="'+(critical?'warn':'good')+'">'+(critical?'⚠️ Nur Teststrecke.':'✓ Vorläufig passend im Demo-Modell.')+'</span>';
+ }catch(e){document.getElementById('routeStatus').innerHTML='<span class="bad">Route konnte nicht berechnet werden.</span>'}
+}
+function savePlace(){
+ if(!targetLL){document.getElementById('places').innerHTML='<span class="warn">Erst einen Kartenpunkt setzen.</span>';return}
+ let name=document.getElementById('place').value.trim()||'Gespeicherter Punkt';
+ places.push({name,lat:targetLL[0],lng:targetLL[1]});localStorage.setItem('hn_places',JSON.stringify(places));renderPlaces();
+}
+function renderPlaces(){
+ document.getElementById('places').innerHTML=places.length?places.map((p,i)=>`<div class="place">📍 <b>${p.name}</b><br>${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>`).join(''):'<span class="muted">Noch keine Punkte.</span>';
+}
+init();
+</script>
+</body>
+</html>
