@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgrarNavi Alpha 0.11</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+body{margin:0;background:#0d120e;color:#f2f5ef;font-family:system-ui,sans-serif}
+header{height:64px;background:#141b15;display:flex;align-items:center;justify-content:space-between;padding:0 15px}
+.logo{font-size:22px;font-weight:900}.logo span{color:#a6f326}small{display:block;color:#aeb8ac;font-size:10px}
+.layout{display:grid;grid-template-columns:390px 1fr;min-height:calc(100vh - 64px)}
+aside{padding:12px;background:#182019;overflow:auto}.card{background:#222c22;border:1px solid #3b493b;border-radius:15px;padding:13px;margin-bottom:11px}
+h2,h3{margin:0 0 9px}input,select,button{font:inherit}input,select{width:100%;padding:10px;margin-top:7px;border-radius:9px;border:1px solid #4b574b;background:#101610;color:#f2f5ef;box-sizing:border-box}
+button{border:0;border-radius:11px;padding:11px 13px;background:#a6f326;color:#0d120e;font-weight:850}.alt{background:#394439;color:#f2f5ef}
+.row{display:flex;gap:6px}.row>*{flex:1}.grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.full{width:100%;margin-top:7px}
+#startSearch + .row button,#targetSearch + .row button{padding:9px 9px;font-size:15px;min-height:42px}
+#startSearch + .row{margin-top:2px}#targetSearch + .row{margin-top:2px}
+.status{margin-top:8px;padding:10px;border-radius:10px;background:#101610;line-height:1.45}
+.suggestions{margin-top:7px;display:grid;gap:6px}
+.suggestion{width:100%;text-align:left;background:#101610;color:#f2f5ef;border:1px solid #4b574b;padding:9px 10px;border-radius:9px}
+.suggestion small{font-size:11px;color:#aeb8ac;margin-top:2px}.good{color:#a6f326}.warn{color:#ffd15a}.bad{color:#ff6969}.muted{color:#aeb8ac;font-size:13px;line-height:1.45}
+.mode{font-size:12px;padding:7px 9px;border-radius:9px;background:#101610;margin-top:8px}.mode strong{color:#a6f326}
+.place{padding:8px 0;border-top:1px solid #3b493b}
+#map{height:calc(100vh - 64px)}
+.navinfo{position:absolute;z-index:500;left:410px;top:78px;background:#101610ee;border:1px solid #3b493b;border-radius:13px;padding:11px 14px;min-width:250px}
+.turn{font-size:28px;vertical-align:middle}
+.mapControls{position:absolute;z-index:600;right:12px;bottom:18px;display:flex;gap:7px;flex-direction:column}
+.mapBtn{background:#101610ee;color:#f2f5ef;border:1px solid #4b574b;padding:10px 12px;border-radius:12px;box-shadow:0 4px 15px #0008}
+.mapBtn.active{background:#a6f326;color:#0d120e}
+.navBanner{position:absolute;z-index:590;left:50%;transform:translateX(-50%);top:16px;width:min(520px,calc(100% - 24px));background:#101610f2;border:1px solid #4b574b;border-radius:16px;padding:10px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 5px 22px #0009}
+.navArrow{font-size:38px;line-height:1}.navBannerDistance{font-size:21px;font-weight:900}.navBannerText{font-size:15px;font-weight:750}
+@media(max-width:850px){
+.layout{display:flex;flex-direction:column}
+.mapbox{order:0;width:100%;height:46vh;min-height:350px;position:relative}
+aside{order:1}
+#map{height:100%;width:100%;min-height:350px}
+.navinfo{left:12px;top:12px;right:12px}.navBanner{top:12px}.mapControls{bottom:14px;right:10px}
+}
+
+.topTabs{display:flex;gap:7px;padding:8px 12px;background:#141b15;border-bottom:1px solid #3b493b}
+.topTab{background:#222c22;color:#f2f5ef;border:1px solid #4b574b;padding:9px 13px;border-radius:10px;font-weight:800}
+.topTab.active{background:#a6f326;color:#0d120e}
+.garage{position:fixed;z-index:1000;inset:0;background:#0d120ef2;display:none;overflow:auto;padding:20px 14px}
+.garagePanel{max-width:700px;margin:20px auto;background:#182019;border:1px solid #4b574b;border-radius:16px;padding:16px}
+.garageHead{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.vehicleCard{background:#101610;border:1px solid #4b574b;border-radius:12px;padding:12px;margin-top:9px}
+.vehicleActions{display:flex;gap:7px;margin-top:8px}
+.vehicleActions button{flex:1}
+@media(max-width:850px){.topTabs{position:sticky;top:0;z-index:800}}
+</style>
+</head>
+<body>
+<header><div class="logo">🌾 Agrar<span>Navi</span><small>ALPHA 0.20 · FAHRZEUGPROFILE · NAVIGATION</small></div><button class="alt" onclick="useGpsStart()">📍 Eigener Standort</button></header>
+<div class="topTabs"><button id="vehicleTab" class="topTab" onclick="openVehicleGarage()">🚜 Fahrzeuge</button></div><div class="layout"><aside>
+<div class="card"><h2>🚜 Fahrzeug</h2>
+<div class="row"><button id="tb" onclick="typeSet('tractor')">🚜 Traktor</button><button id="lb" class="alt" onclick="typeSet('truck')">🚛 LKW</button></div>
+<div id="modeInfo" class="mode"></div>
+<select id="brand"></select><input id="model" placeholder="Modell">
+<select id="trailer"><option>Kein Anhänger</option><option>Tandem</option><option>Tridem</option><option>Drehschemel</option><option>Tieflader</option><option>Güllewagen</option><option>Kipper</option></select>
+<div class="grid"><input id="width" type="number" step=".01" placeholder="B: Breite (m)"><input id="height" type="number" step=".01" placeholder="H: Höhe (m)"><input id="length" type="number" step=".1" placeholder="L: Länge (m)"><input id="weight" type="number" step=".1" placeholder="G: Gesamtgewicht (t)"></div>
+<select id="maxSpeed"><option value="" selected disabled>Vmax: Geschwindigkeit auswählen</option></select><div class="muted" style="margin-top:6px">B/H/L/G/WR/Vmax bitte für jedes Fahrzeug bzw. Gespann selbst eintragen.</div><input id="radius" type="number" step=".1" placeholder="WR: Wenderadius (m)">
+<button class="full" onclick="saveProfile()">💾 Fahrzeug speichern</button>
+</div>
+
+<div class="card"><h2>🧭 Navigation</h2>
+<label class="muted">📍 Start</label><input id="startSearch" placeholder="Adresse, Hof oder Feld als Start">
+<div class="row"><button class="alt" onclick="useGpsStart()">📍 Eigener Standort</button><button class="alt" onclick="searchStart()">🔎 Suchen</button><button class="alt" onclick="armMapStart()">🗺️ Karte</button></div>
+<div id="startStatus" class="status">Start noch nicht festgelegt.</div>
+<div id="startSuggestions" class="suggestions"></div>
+<label class="muted" style="display:block;margin-top:10px">🎯 Ziel</label><input id="targetSearch" placeholder="Adresse, Ort oder Feld als Ziel">
+<div class="row"><button onclick="searchTarget()" class="alt">🔎 Suchen</button><button class="alt" onclick="armMapTarget()">🎯 Karte</button></div>
+<div id="targetStatus" class="status">Ziel noch nicht festgelegt.</div>
+<div id="targetSuggestions" class="suggestions"></div>
+<button class="full alt" onclick="swapStartTarget()">🔄 Start ↔ Ziel tauschen</button>
+<button class="full" onclick="route()">🛣️ Route berechnen</button>
+<button class="full alt" id="voiceBtn" onclick="toggleVoice()">🔊 Sprachansagen: EIN</button>
+<div id="routeStatus" class="status">Noch keine Route berechnet.</div>
+</div>
+
+<div class="card"><h3>🌾 Hof / Feld / Einfahrt</h3>
+<input id="place" placeholder="z.B. Hof Müller · Feld 17 · Einfahrt Süd">
+<button class="full" onclick="savePlace()">📍 Punkt speichern</button><div id="places"></div>
+</div>
+<div class="card"><h3>⚠️ Sicherheitscheck</h3><div id="checks" class="muted">Noch keine Route geprüft.</div></div>
+<div class="card muted"><b>Wichtig:</b> AgrarNavi ist eine Alpha. Route und Sprachführung sind eine technische Demo und keine Garantie für Befahrbarkeit. Beschilderung, Sperrungen, Maße, Gewichte und lokale Verbote müssen geprüft werden.</div>
+</aside>
+<div class="mapbox">
+<div id="map"></div>
+<div id="navBanner" class="navBanner" style="display:none">
+  <div class="navArrow" id="navBannerArrow">↱</div>
+  <div><div class="navBannerDistance" id="navBannerDistance">–</div><div id="navBannerText">Navigation</div></div>
+</div>
+<div class="mapControls">
+  <button id="orientationBtn" class="mapBtn" onclick="toggleOrientation()">🧭 Fahrtrichtung</button>
+  <button id="activeNavBtn" class="mapBtn" onclick="toggleActiveNavigation()">🚜 Navigation</button>
+</div><div style="position:absolute;z-index:450;left:12px;top:12px;background:#101610dd;border:1px solid #3b493b;border-radius:10px;padding:7px 10px;font-weight:800;pointer-events:none">🗺️ AgrarNavi Karte</div><div id="navInfo" class="navinfo" style="display:none"><span class="turn" id="turnIcon">➡️</span> <b id="turnText">Navigation</b><br><span id="turnDistance">–</span></div></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const tractorBrands=['Fendt','John Deere','CLAAS','Case IH','New Holland','Deutz-Fahr','Valtra','Massey Ferguson','Steyr','Kubota','Same','Lindner','Sonstige'];
+const truckBrands=['MAN','Mercedes-Benz','Scania','Volvo','DAF','Iveco','Renault Trucks','Sonstige'];
+let type='tractor',map,userMarker,startMarker,targetMarker,routeLine,startLL=null,targetLL=null;
+let places=JSON.parse(localStorage.getItem('an_places')||'[]'),voiceOn=true,steps=[],lastSpoken=-1,mapPick=null;
+const $=id=>document.getElementById(id),n=id=>parseFloat($(id).value)||0;
+
+function init(){
+ map=L.map('map').setView([51.9,10.5],6);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap-Mitwirkende'}).addTo(map);
+ map.on('click',e=>{if(mapPick==='start'){setStart(e.latlng);mapPick=null}else if(mapPick==='target'){setTarget(e.latlng);mapPick=null}});
+ typeSet('tractor');renderPlaces();renderVehicles();renderGarage();
+}
+function typeSet(t){
+ type=t;$('tb').className=t==='tractor'?'':'alt';$('lb').className=t==='truck'?'':'alt';
+ $('brand').innerHTML=(t==='tractor'?tractorBrands:truckBrands).map(x=>'<option>'+x+'</option>').join('');
+ $('model').value='';$('width').value='';$('height').value='';$('length').value='';$('weight').value='';$('radius').value='';
+ $('maxSpeed').innerHTML=(t==='tractor'?[40,50,60]:[80,90,100]).map(x=>'<option value="'+x+'">'+x+' km/h</option>').join('');$('maxSpeed').selectedIndex=-1;
+ $('modeInfo').innerHTML=t==='tractor'?'<strong>Traktor-Modus</strong><br>Autobahn und Kraftfahrstraße werden ausgeschlossen.':'<strong>LKW-Modus</strong><br>Autobahnen sind erlaubt.';
+}
+function profile(){return{brand:$('brand').value,model:$('model').value,trailer:$('trailer').value,width:n('width'),height:n('height'),length:n('length'),weight:n('weight'),radius:n('radius'),maxSpeed:n('maxSpeed')}}
+function saveProfile(){
+ let p=profile(),key=type+'|'+p.brand+'|'+p.model+'|'+p.trailer;
+ let list=JSON.parse(localStorage.getItem('an_vehicles')||'[]');
+ list=list.filter(v=>v.key!==key);p.key=key;p.type=type;list.unshift(p);
+ localStorage.setItem('an_vehicles',JSON.stringify(list));localStorage.setItem('an_profile',JSON.stringify(p));
+ $('routeStatus').innerHTML='<span class="good">✓ Fahrzeug gespeichert.</span><br>'+p.brand+' '+p.model+' · '+p.trailer+' · max. '+p.maxSpeed+' km/h';
+ renderVehicles();renderGarage();
+}
+
+
+function openVehicleGarage(){
+ const g=$('vehicleGarage'); if(!g)return;
+ g.style.display='block'; renderGarage();
+}
+function closeVehicleGarage(){
+ const g=$('vehicleGarage'); if(g)g.style.display='none';
+}
+function renderGarage(){
+ const box=$('garageList'); if(!box)return;
+ const list=JSON.parse(localStorage.getItem('an_vehicles')||'[]');
+ if(!list.length){
+   box.innerHTML='<div class="status">Noch keine Fahrzeuge oder Gespanne gespeichert.</div>';
+   return;
+ }
+ box.innerHTML=list.map((v,i)=>{
+   const kind=v.type==='tractor'?'🚜 Traktor':'🚛 LKW';
+   return '<div class="vehicleCard"><b>'+kind+' · '+escapeHtml(v.brand+' '+v.model)+'</b>'+
+   '<div class="muted" style="margin-top:5px">'+escapeHtml(v.trailer||'Kein Anhänger')+
+   ' · '+Number(v.width||0).toFixed(2)+' m · '+Number(v.weight||0).toFixed(1)+' t · '+(v.maxSpeed||0)+' km/h</div>'+
+   '<div class="vehicleActions"><button class="alt" onclick="loadVehicle('+i+');closeVehicleGarage()">✓ Auswählen</button>'+
+   '<button class="alt" onclick="deleteVehicle('+i+')">🗑 Löschen</button></div></div>';
+ }).join('');
+}
+function deleteVehicle(i){
+ let list=JSON.parse(localStorage.getItem('an_vehicles')||'[]');
+ list.splice(i,1); localStorage.setItem('an_vehicles',JSON.stringify(list)); renderGarage(); renderVehicles();renderGarage();
+}
+
+function renderVehicles(){
+ const box=$('savedVehicles'); if(!box)return;
+ const list=JSON.parse(localStorage.getItem('an_vehicles')||'[]');
+ if(!list.length){box.innerHTML='<span class="muted">Noch keine Fahrzeuge gespeichert.</span>';return}
+ box.innerHTML=list.map((v,i)=>
+ '<div class="place"><b>'+(v.type==='tractor'?'🚜 ':'🚛 ')+escapeHtml(v.brand+' '+v.model)+'</b><br>'+
+ '<span class="muted">'+escapeHtml(v.trailer)+' · '+v.width.toFixed(2)+' m breit · '+v.weight.toFixed(1)+' t · '+v.maxSpeed+' km/h</span>'+
+ '<button class="alt" style="float:right;padding:5px 8px" onclick="loadVehicle('+i+')">Auswählen</button></div>'
+ ).join('');
+}
+function toggleVehicles(){
+ const box=$('savedVehicles');if(!box)return;
+ box.style.display=box.style.display==='none'?'block':'none';
+ if(box.style.display==='block')renderVehicles();renderGarage();
+}
+function loadVehicle(i){
+ const list=JSON.parse(localStorage.getItem('an_vehicles')||'[]'),v=list[i];if(!v)return;
+ typeSet(v.type||'tractor');$('brand').value=v.brand;$('model').value=v.model;$('trailer').value=v.trailer;
+ $('width').value=v.width;$('height').value=v.height;$('length').value=v.length;$('weight').value=v.weight;
+ $('maxSpeed').value=v.maxSpeed;$('radius').value=v.radius;
+ localStorage.setItem('an_profile',JSON.stringify(v));
+ $('routeStatus').innerHTML='<span class="good">✓ Fahrzeug ausgewählt.</span><br>'+escapeHtml(v.brand+' '+v.model);
+}
+
+function setStart(ll){startLL=[+ll.lat,+ll.lng];if(startMarker)startMarker.setLatLng(startLL);else startMarker=L.marker(startLL).addTo(map).bindPopup('📍 Start');$('startStatus').innerHTML='<span class="good">📍 Start gesetzt.</span><br>'+startLL[0].toFixed(5)+', '+startLL[1].toFixed(5)}
+function setTarget(ll){targetLL=[+ll.lat,+ll.lng];if(targetMarker)targetMarker.setLatLng(targetLL);else targetMarker=L.circleMarker(targetLL,{radius:10,color:'#ff4d4d',fillColor:'#ff4d4d',fillOpacity:.95,weight:3}).addTo(map).bindPopup('🎯 Ziel');$('targetStatus').innerHTML='<span class="good">🎯 Ziel gesetzt.</span><br>'+targetLL[0].toFixed(5)+', '+targetLL[1].toFixed(5)}
+function armMapStart(){mapPick='start';$('startStatus').innerHTML='<span class="warn">🗺️ Jetzt auf die Karte tippen, um den Start zu setzen.</span>'}
+function armMapTarget(){mapPick='target';$('targetStatus').innerHTML='<span class="warn">🎯 Jetzt auf die Karte tippen, um das Ziel zu setzen.</span>'}
+function useGpsStart(){
+ if(!navigator.geolocation){$('startStatus').innerHTML='<span class="bad">GPS wird nicht unterstützt.</span>';return}
+ startHeadingWatch();navigator.geolocation.getCurrentPosition(pos=>{let ll={lat:pos.coords.latitude,lng:pos.coords.longitude};setStart(ll);if(userMarker)userMarker.setLatLng([ll.lat,ll.lng]);else userMarker=L.marker([ll.lat,ll.lng]).addTo(map).bindPopup('📍 Dein Standort');map.setView([ll.lat,ll.lng],15)},
+ err=>$('startStatus').innerHTML='<span class="bad">GPS konnte nicht ermittelt werden.</span><br>'+err.message,{enableHighAccuracy:true,timeout:15000,maximumAge:5000});
+}
+async function geocode(q,kind){
+ try{
+  const box=$(kind==='start'?'startSuggestions':'targetSuggestions');
+  box.innerHTML='<div class="muted">🔎 Suche Straßen und Adressen…</div>';
+  let r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&countrycodes=de,at,ch&q='+encodeURIComponent(q),{headers:{'Accept-Language':'de'}});
+  if(!r.ok)throw new Error('Suchdienst antwortet nicht ('+r.status+')');
+  let a=await r.json();
+  if(!a.length)throw new Error('Keine passenden Straßen oder Adressen gefunden');
+  box.innerHTML=a.map((x,i)=>{
+    const label=(x.display_name||'').split(',').slice(0,3).join(', ');
+    const detail=(x.display_name||'').split(',').slice(3,6).join(', ');
+    return '<button class="suggestion" onclick="chooseSearchResult('+i+',\''+kind+'\')">📍 <b>'+escapeHtml(label)+'</b><small>'+escapeHtml(detail)+'</small></button>';
+  }).join('');
+  window._geoResults=window._geoResults||{};
+  window._geoResults[kind]=a;
+  $(kind==='start'?'startStatus':'targetStatus').innerHTML='<span class="good">✓ Bitte einen Treffer auswählen.</span>';
+ }catch(e){
+  $(kind==='start'?'startStatus':'targetStatus').innerHTML='<span class="bad">'+(kind==='start'?'Start':'Ziel')+' nicht gefunden.</span><br>'+escapeHtml(e.message);
+  $(kind==='start'?'startSuggestions':'targetSuggestions').innerHTML='';
+ }
+}
+function escapeHtml(s){
+ return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function chooseSearchResult(i,kind){
+ const a=(window._geoResults&&window._geoResults[kind]||[])[i];
+ if(!a)return;
+ const ll={lat:+a.lat,lng:+a.lon};
+ if(kind==='start'){setStart(ll);$('startSearch').value=a.display_name||'';map.setView([ll.lat,ll.lng],16);$('startSuggestions').innerHTML='';}
+ else{setTarget(ll);$('targetSearch').value=a.display_name||'';map.setView([ll.lat,ll.lng],16);$('targetSuggestions').innerHTML='';}
+}
+
+function searchStart(){let q=$('startSearch').value.trim();if(q){$('startStatus').textContent='🔎 Suche Start…';geocode(q,'start')}}
+function searchTarget(){let q=$('targetSearch').value.trim();if(q){$('targetStatus').textContent='🔎 Suche Ziel…';geocode(q,'target')}}
+function swapStartTarget(){
+ if(!startLL||!targetLL){$('routeStatus').innerHTML='<span class="warn">Bitte zuerst Start und Ziel festlegen.</span>';return}
+ let a=startLL;startLL=targetLL;targetLL=a;if(startMarker)startMarker.setLatLng(startLL);if(targetMarker)targetMarker.setLatLng(targetLL);
+ $('startStatus').innerHTML='<span class="good">📍 Start und Ziel getauscht.</span><br>'+startLL[0].toFixed(5)+', '+startLL[1].toFixed(5);
+ $('targetStatus').innerHTML='<span class="good">🎯 Neues Ziel.</span><br>'+targetLL[0].toFixed(5)+', '+targetLL[1].toFixed(5)
+}
+let germanVoice=null;
+function loadGermanVoice(){
+ if(!('speechSynthesis'in window))return;
+ const voices=speechSynthesis.getVoices();
+ germanVoice=voices.find(v=>/^de(-|_)/i.test(v.lang)&&/premium|enhanced|natural|anna|petra|markus|helena/i.test(v.name))
+ || voices.find(v=>/^de(-|_)/i.test(v.lang)) || null;
+}
+if('speechSynthesis' in window){
+ loadGermanVoice();
+ speechSynthesis.onvoiceschanged=loadGermanVoice;
+}
+let speaking=false;
+function speak(text){
+ if(!voiceOn||!('speechSynthesis'in window)||!text||speaking)return;
+ const u=new SpeechSynthesisUtterance(text);
+ u.lang='de-DE';
+ if(germanVoice)u.voice=germanVoice;
+ u.rate=.88;
+ u.pitch=1;
+ u.volume=1;
+ u.onstart=()=>speaking=true;
+ u.onend=()=>speaking=false;
+ u.onerror=()=>speaking=false;
+ speechSynthesis.speak(u);
+}
+function toggleVoice(){voiceOn=!voiceOn;$('voiceBtn').textContent=voiceOn?'🔊 Sprachansagen: EIN':'🔇 Sprachansagen: AUS';if(voiceOn)speak('Sprachansagen eingeschaltet')}
+function direction(step){
+ let m=(step.maneuver&&step.maneuver.type)||'continue',mod=(step.maneuver&&step.maneuver.modifier)||'';
+ if(m==='arrive')return['🏁','Du hast dein Ziel erreicht'];if(m==='depart')return['🚜','Fahrt beginnen'];if(m==='roundabout'||m==='rotary')return['🔄','Im Kreisverkehr ausfahren'];if(m==='merge')return['↗️','Einfädeln'];if(m==='fork')return[mod.includes('left')?'↖️':'↗️','An der Gabelung '+(mod.includes('left')?'links':'rechts')+' halten'];if(mod.includes('left'))return['↰','Links abbiegen'];if(mod.includes('right'))return['↱','Rechts abbiegen'];return['⬆️','Dem Straßenverlauf folgen']
+}
+function formatDist(m){return m<1000?Math.round(m)+' Meter':(m/1000).toFixed(1)+' Kilometer'}
+function showStep(i,force=false){
+ if(!steps[i])return;let s=steps[i],d=direction(s),dist=s.distance||0;$('navInfo').style.display='block';$('turnIcon').textContent=d[0];$('turnText').textContent=d[1];$('turnDistance').textContent=formatDist(dist);
+ if(activeNavigation){$('navBanner').style.display='flex';$('navBannerArrow').textContent=d[0];$('navBannerDistance').textContent=formatDist(dist);$('navBannerText').textContent=d[1];}
+ if(force||i!==lastSpoken){let prefix=dist<50?'Jetzt':'In '+formatDist(dist);speak(prefix+' '+d[1]+'.');lastSpoken=i}
+}
+
+let followHeading=true,lastHeading=null,watchId=null;
+let activeNavigation=false;
+function updateActiveNavButton(){
+ const b=$('activeNavBtn'); if(!b)return;
+ b.textContent=activeNavigation?'⛔ Navigation beenden':'🚜 Navigation';
+ b.className=activeNavigation?'mapBtn active':'mapBtn';
+}
+function toggleActiveNavigation(){
+ if(!steps.length){
+   $('routeStatus').innerHTML='<span class="warn">Bitte zuerst eine Route berechnen.</span>';
+   return;
+ }
+ activeNavigation=!activeNavigation;
+ updateActiveNavButton();
+ if(activeNavigation){
+   $('navBanner').style.display='flex';
+   showStep(0,true);
+ }else{
+   $('navBanner').style.display='none';
+ }
+}
+
+function updateOrientationButton(){
+ const b=$('orientationBtn');
+ b.textContent=followHeading?'🧭 Fahrtrichtung':'🧭 Norden oben';
+ b.className=followHeading?'mapBtn active':'mapBtn';
+}
+function rotateMapToHeading(){
+ if(!followHeading||lastHeading===null||!map)return;
+ // Leaflet itself does not rotate the base map; use CSS rotation on the map pane
+ // so the driver's view follows heading while keeping markers/route readable.
+ const pane=document.querySelector('#map .leaflet-map-pane');
+ if(pane) pane.style.transform='rotate('+(-lastHeading)+'deg)';
+
+}
+function resetMapRotation(){
+ const pane=document.querySelector('#map .leaflet-map-pane');
+ if(pane){pane.style.transform='';}
+}
+function toggleOrientation(){
+ followHeading=!followHeading;
+ if(followHeading){rotateMapToHeading();}else{resetMapRotation();}
+ updateOrientationButton();
+}
+function startHeadingWatch(){
+ if(!navigator.geolocation||watchId!==null)return;
+ watchId=navigator.geolocation.watchPosition(pos=>{
+   if(typeof pos.coords.heading==='number'&&!Number.isNaN(pos.coords.heading)&&pos.coords.heading>=0){
+     lastHeading=pos.coords.heading;
+     if(followHeading) rotateMapToHeading();
+   }
+ },()=>{}, {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
+}
+function stopHeadingWatch(){
+ if(watchId!==null&&navigator.geolocation){navigator.geolocation.clearWatch(watchId);watchId=null;}
+}
+
+async function route(){
+ if(!startLL){$('routeStatus').innerHTML='<span class="warn">Bitte zuerst einen Start setzen – GPS, Suche oder Karte.</span>';return}
+ if(!targetLL){$('routeStatus').innerHTML='<span class="warn">Bitte zuerst ein Ziel setzen.</span>';return}
+ if(startLL[0]===targetLL[0]&&startLL[1]===targetLL[1]){$('routeStatus').innerHTML='<span class="warn">Start und Ziel sind identisch.</span>';return}
+ let p=profile();$('routeStatus').textContent='🧭 Route wird berechnet…';
+ try{
+  let exclude=type==='tractor'?'&exclude=motorway':'';
+  let u='https://router.project-osrm.org/route/v1/driving/'+startLL[1]+','+startLL[0]+';'+targetLL[1]+','+targetLL[0]+'?overview=full&geometries=geojson&steps=true&annotations=false'+exclude;
+  let response=await fetch(u);
+  let d=await response.json().catch(()=>({}));
+  if(!response.ok||d.code!=='Ok'||!d.routes||!d.routes[0]){
+   if(type==='tractor'){
+    let fallback='https://router.project-osrm.org/route/v1/driving/'+startLL[1]+','+startLL[0]+';'+targetLL[1]+','+targetLL[0]+'?overview=full&geometries=geojson&steps=true&annotations=false';
+    response=await fetch(fallback); d=await response.json().catch(()=>({}));
+    if(response.ok&&d.code==='Ok'&&d.routes&&d.routes[0]){ $('routeStatus').innerHTML='<span class="warn">⚠️ Route gefunden, aber der Traktor-Straßenausschluss konnte vom Routingdienst nicht angewendet werden. Bitte Autobahn/Kraftfahrstraße vor Fahrtantritt prüfen.</span>'; }
+    else throw new Error(d.message||'Keine Route gefunden');
+   }else throw new Error(d.message||'Routingdienst antwortet nicht ('+response.status+')');
+  }
+  if(routeLine)map.removeLayer(routeLine);routeLine=L.geoJSON(d.routes[0].geometry,{style:{color:type==='tractor'?'#a6f326':'#5aa7ff',weight:7}}).addTo(map);map.fitBounds(routeLine.getBounds(),{padding:[20,20]});
+  steps=(d.routes[0].legs||[]).flatMap(x=>x.steps||[]);lastSpoken=-1;showStep(0,true);
+  let km=d.routes[0].distance/1000,eta=Math.max(1,Math.round(d.routes[0].duration/60));
+  $('routeStatus').innerHTML='<span class="good">🟢 Route gefunden.</span><br>'+km.toFixed(1)+' km · Kartenschätzung ca. '+eta+' min<br><span class="good">✓ '+(type==='tractor'?'Autobahn/Kraftfahrstraße ausgeschlossen.':'Autobahnen im LKW-Modus erlaubt.')+'</span><br><span class="muted">🔊 Sprachführung '+(voiceOn?'aktiv':'aus')+'.</span>';
+  $('checks').innerHTML='Fahrzeug: '+p.brand+' '+p.model+' · '+p.trailer+'<br>Breite: '+p.width.toFixed(2)+' m · Höhe: '+p.height.toFixed(2)+' m · Länge: '+p.length.toFixed(1)+' m · Gewicht: '+p.weight.toFixed(1)+' t<br>Höchstgeschwindigkeit: '+p.maxSpeed+' km/h<br><br><span class="warn">⚠️ Alpha: Brücken, Sperrungen und lokale Verbote sind noch nicht vollständig garantiert.</span>'
+ }catch(e){$('navInfo').style.display='none';$('routeStatus').innerHTML='<span class="bad">⛔ Route konnte nicht berechnet werden.</span><br><span class="muted">Grund: '+e.message+'</span>'}
+}
+function savePlace(){if(!targetLL){$('places').innerHTML='<span class="warn">Erst ein Ziel setzen.</span>';return}let name=$('place').value.trim()||'Gespeicherter Punkt';places.push({name,lat:targetLL[0],lng:targetLL[1]});localStorage.setItem('an_places',JSON.stringify(places));renderPlaces()}
+function renderPlaces(){$('places').innerHTML=places.length?places.map((p,i)=>'<div class="place">📍 <b>'+p.name+'</b><br>'+p.lat.toFixed(5)+', '+p.lng.toFixed(5)+' <button class="alt" style="float:right;padding:5px 8px" onclick="usePlace('+i+')">Ziel</button></div>').join(''):'<span class="muted">Noch keine Punkte.</span>'}
+function usePlace(i){let p=places[i];setTarget({lat:p.lat,lng:p.lng});map.setView([p.lat,p.lng],15)}
+init();updateOrientationButton();updateActiveNavButton();
+setTimeout(()=>{if(map)map.invalidateSize();},500);
+window.addEventListener('resize',()=>{if(map)map.invalidateSize();});
+</script>
+
+<div id="vehicleGarage" class="garage">
+  <div class="garagePanel">
+    <div class="garageHead">
+      <h2>🚜 Fahrzeuge & Gespanne</h2>
+      <button class="alt" onclick="closeVehicleGarage()">✕ Schließen</button>
+    </div>
+    <p class="muted">Hier kannst du gespeicherte Fahrzeuge und Gespanne auswählen.</p>
+    <div id="garageList"></div>
+  </div>
+</div>
+</body>
+</html>
